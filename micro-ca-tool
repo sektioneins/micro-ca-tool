@@ -1,0 +1,873 @@
+#!/bin/bash
+##
+## micro CA tool
+## (C) 2015, SektionEins GmbH / Ben Fuhrmannek
+## All rights reserved.
+##
+
+## global defaults
+g_configfile="./micro-ca-tool.config"
+g_debug=0
+g_version="0.1dev1"
+g_bin_search_path=( "/opt/local/bin" "/usr/local/bin" "/Library/OpenSC/bin" )
+g_engine_pkcs11_path=( /usr/lib/engines /usr/local/lib/engines /Library/OpenSC/lib/engines )
+g_opensc_pkcs11_path=( /usr/lib/x86_64-linux-gnu /Library/OpenSC/lib )
+
+## getopts
+function parse_options() {
+	local opt
+	while getopts "c:vh" opt; do
+		case "$opt" in
+			c) g_configfile="$OPTARG" ;;
+			v) g_debug=1 ;;
+			h)
+				first_time_user
+				msg "Usage: $0 [-c <config>] [-v] [-h] [<menu> <submenu>]"
+				msg "  -c  specify alternative config file"
+				msg "  -v  be verbose"
+				msg "  -h  show this help message"
+				msg " optional [<menu> <submenu>] directly calls a function, then exits."
+				exit 0
+				;;
+			*) exit 1
+		esac
+	done
+}
+
+##
+
+function banner() {
+cat <<EOF
+                 mmm    mm         mmmmmmm               ""#
+ m   m         m"   "   ##            #     mmm    mmm     #
+ #   #         #       #  #           #    #" "#  #" "#    #
+ #   #   """   #       #mm#   """     #    #   #  #   #    #
+ #mmm#m         "mmm" #    #          #    "#m#"  "#m#"    "mm
+ #
+ "               (C) 2015 SektionEins GmbH / Ben Fuhrmannek
+                 https://sektioneins.com/
+                 https://github.com/sektioneins/micro-ca-tool
+EOF
+msg "Version: $g_version"
+}
+
+##
+
+function msg() {
+	echo "[#] $*"
+}
+
+function msg_input() {
+	echo "[?] $*"
+}
+
+function msg_debug() {
+	if [[ $g_debug -ne 0 ]]; then
+		echo "[D] $*"
+	fi
+}
+
+function msg_error() {
+	echo "[E] $*"
+}
+
+function msg_warning() {
+	echo "[W] $*"
+}
+
+##
+
+function call() {
+	msg_debug "calling: $@"
+	"$@"
+	if [[ $? -ne 0 ]]; then
+		msg_error ":( something went terribly wrong here."
+	else
+		msg_debug "call complete."
+	fi
+}
+
+## find apps
+
+function need_resources() {
+	local name
+	for name in "$@"; do
+		need_resource "$name"
+	done
+}
+
+function need_resource() {
+	case "$1" in
+		openssl)
+			find_executable cfg_app_openssl "Please select openssl binary or enter full path" openssl
+			;;
+		gpg)
+			find_executable cfg_app_gpg "Please select gpg version 2 binary or enter full path" gpg2 gpg
+			;;
+		pkcs15-init)
+			find_executable cfg_app_pkcs15_init "Please select the OpenSC pkcs15-init tool" pkcs15-init
+			;;
+		pkcs15-tool)
+			find_executable cfg_app_pkcs15_tool "Please select the OpenSC pkcs15-tool" pkcs15-tool
+			;;
+		opensc-tool)
+			find_executable cfg_app_opensc_tool "Please select the opensc-tool" opensc-tool
+			;;
+		engine_pkcs11)
+			find_file cfg_file_engine_pkcs11 "Please select your engine library (engine_pkcs11.so)" engine_pkcs11.so "${g_engine_pkcs11_path[@]}"
+			;;
+		opensc_pkcs11)
+			find_file cfg_file_opensc_pkcs11 "Please select your PKCS#11 library (opensc-pkcs11.so)" opensc-pkcs11.so "${g_opensc_pkcs11_path[@]}"
+			;;
+		ssh-keygen)
+			find_executable cfg_app_ssh_keygen "Please select OpenSSH's ssh-keygen" ssh-keygen
+			;;
+		ssss-split)
+			find_executable cfg_app_ssss_split "Please select ssss-split" ssss-split
+			;;
+		ssss-combine)
+			find_executable cfg_app_ssss_combine "Please select ssss-combine" ssss-combine
+			;;
+		casetup)
+			need_cfg cfg_ca_dir
+			local i
+			for i in certs crl newcerts; do
+				mkdir -p "${cfg_ca_dir}/$i"
+			done
+			if [[ ! -f "${cfg_ca_dir}/serial" ]]; then
+				echo 0a >"${cfg_ca_dir}/serial"
+			fi
+			if [[ ! -f "${cfg_ca_dir}/index.txt" ]]; then
+				touch "${cfg_ca_dir}/index.txt"
+				touch "${cfg_ca_dir}/index.txt.attr"
+			fi
+			;;
+		*)
+			msg_error "$1: unknown app"
+			return
+			;;
+	esac
+	save_config
+}
+
+function is_executable() {
+	if [[ -z "$1" ]]; then
+		return 1
+	fi
+	if which "$1" >/dev/null; then
+		return 0
+	fi
+	return 1
+}
+
+function find_executable() {
+	local dir fn fullfn
+	local -a options
+	local varname="$1"
+	local prompt="$2"
+	
+	if is_executable ${!varname}; then
+		msg_debug "using ${!varname}"
+		return
+	fi
+	
+	for fn in "${@:3}"; do
+		if which "$fn" >/dev/null; then
+			echo "ok"
+			options=( "${options[@]}" "$fn" )
+		fi
+		
+		for dir in "${g_bin_search_path[@]}"; do
+			fullfn="$dir/$fn"
+			if [[ -x "$fullfn" ]]; then
+				options=( "${options[@]}" "$fullfn" )
+			fi
+		done
+	done
+	
+	if [[ ${#options[@]} -eq 0 ]]; then
+		readinput -v "$varname" -f is_executable "$prompt"
+		msg_debug "using ${!varname}"
+	else
+		
+		msg_input "$prompt"
+
+		select fullfn in "${options[@]}"; do
+			if [[ -z "$fullfn" ]]; then
+				fullfn="$REPLY"
+			fi
+			
+			if is_executable "$fullfn"; then
+				eval "$varname=\"\$fullfn\""
+				msg_debug "using ${!varname}"
+				return
+			else
+				msg_error "$fullfn: not executable"
+			fi
+		done
+	fi
+}
+
+function find_file() {
+	local dir varname="$1" prompt="$2" fn="$3" fullfn
+	local -a options
+
+	if [[ -n ${!varname} && -f ${!varname} ]] ; then
+		msg_debug "using ${!varname}"
+		return
+	fi
+
+	for dir in ${@:4}; do
+		fullfn="$dir/$fn"
+		if [[ -f "$fullfn" ]]; then
+			options=( "${options[@]}" "$fullfn" )
+		fi
+	done
+
+	if [[ ${#options[@]} -eq 0 ]]; then
+		readinput -v "$varname" -f validate_file_exists "$prompt"
+		msg_debug "using ${!varname}"
+	else
+		
+		msg_input "$prompt"
+
+		select fullfn in "${options[@]}"; do
+			if [[ -z "$fullfn" ]]; then
+				fullfn="$REPLY"
+			fi
+			
+			if validate_file_exists "$fullfn"; then
+				eval "$varname=\"\$fullfn\""
+				msg_debug "using ${!varname}"
+				return
+			fi
+		done
+	fi
+}
+
+##
+
+function readinput() {
+	local opt
+	local varname default_value validator_func dontask=0
+	OPTIND=1
+	while getopts "v:d:f:n" opt; do
+		case "$opt" in
+			v) varname="$OPTARG" ;;
+			d) default_value="$OPTARG" ;;
+			f) validator_func="$OPTARG" ;;
+			n) dontask=1 ;;
+		esac
+	done
+	shift $((OPTIND-1))
+	local prompt="$1"
+	
+	local input
+	if [[ -n "$varname" && -n "${!varname}" ]]; then
+		default_value="${!varname}"
+	fi
+
+	while true; do
+		if [[ $dontask -eq 1 && -n "${!varname}" ]]; then
+			dontask=0
+			msg "${prompt} [${!varname}]"
+		else
+			read -er -p "[?] ${prompt} [$default_value] " input
+		fi
+		
+		if [[ -z "$input" ]]; then
+			input="$default_value"
+		fi
+		
+		if [[ -n "$validator_func" ]]; then
+			$validator_func "$input"
+			if [[ $? != 0 ]]; then
+				continue
+			fi
+		fi
+		break
+	done
+	
+	if [[ -n "$varname" ]]; then
+		eval "$varname=\"\$input\""
+	else
+		REPLY="$input"
+	fi
+}
+
+function readinput_yesno() {
+	readinput -f validate_yesno "$@"
+	[[ "$REPLY" == "y" ]]
+}
+
+##
+
+function showmenu() {
+	local opt
+	local prompt=""
+	local menuname="unknown"
+	local title=""
+	OPTIND=1
+	while getopts "p:n:t:" opt; do
+		case "$opt" in
+			p) prompt="$OPTARG" ;;
+			n) menuname="$OPTARG" ;;
+			t) title="$OPTARG" ;;
+		esac
+	done
+	shift $((OPTIND-1))
+	local -a options=( "${@:1}" )
+
+	while true; do
+		echo ""
+		msg "$title"
+	
+		local i=0
+		local k v input
+		local -a keys=()
+		local cmd=""
+		while [[ $i -lt ${#options[@]} ]]; do
+			k=${options[$i]}
+			v=${options[$((i+1))]}
+			keys=( "${keys[@]}" "$k" )
+			if [[ "x$k" == "x" ]]; then k="<Return>"; fi
+			printf -- " | %10s  %s\n" "$k" "$v"
+			i=$((i+2))
+		done
+	
+		read -er -p "$prompt> " input
+		if [[ $? -gt 0 ]]; then
+			break
+		fi
+		
+		for k in "${keys[@]}"; do
+			if [[ "$input" == "$k" ]]; then
+				cmd="do_${menuname}_${k}"
+				break
+			fi
+		done
+		
+		if [[ "x$cmd" != "x" ]]; then
+			$cmd
+			if [[ "$?" == 2 ]]; then break; fi
+		else
+			msg ":( invalid command"
+		fi
+	done
+}
+
+## openssl helper
+
+function openssl_engine() {
+	echo "engine dynamic -pre \"SO_PATH:${cfg_file_engine_pkcs11}\" -pre ID:pkcs11 -pre LIST_ADD:1 -pre LOAD -pre \"MODULE_PATH:${cfg_file_opensc_pkcs11}\""
+}
+
+## menus
+
+function mainmenu() {
+	local -a options=(
+		"ca" "Certificate Authority"
+		"sc" "SmartCard functions PKCS#11/PKCS#15"
+		"gpg" "GNUPG shortcuts"
+		"ssl" "openssl shortcuts"
+		"q" "Quit")
+	showmenu -t "MAIN MENU" -p "/" -n main "${options[@]}"
+}
+
+function do_main_q() {
+	return 2
+}
+
+function do_main_ca() {
+	local -a options=(
+		"new-ca" "Generate new self-signed Root-CA"
+		"new-key" "Generate new RSA private key file for the CA"
+		"new-csr" "Generate a CSR for an intermediate CA (requires private key or smartcard)"
+		"sign-csr" "Sign a Certificate Signing Request"
+		"tocard" "Copy CA key and certificate to smartcard"
+		"nofm" "encrypt CA's private key with Shamir's secret sharing scheme (n-of-m)"
+		"nofm-recovery" "decrypt private key"
+		"" "Back")
+	showmenu -t "CA MENU" -p "CA" -n ca "${options[@]}"
+}
+
+function do_ca_() {
+	return 2
+}
+
+function do_ca_new-ca() {
+	need_resources openssl
+	need_cfg cfg_ca_dir  cfg_ca_keyfile/no_override cfg_ca_certfile/no_override cfg_ca_rsa_bits cfg_ca_days
+	
+	local keyfile="${cfg_ca_dir}/$cfg_ca_keyfile"
+	local certfile="${cfg_ca_dir}/$cfg_ca_certfile"
+	call "$cfg_app_openssl" genrsa -out "$keyfile" "$cfg_ca_rsa_bits"
+	call chmod 600 "$keyfile"
+	call "$cfg_app_openssl" req -x509 -new -nodes -key "$keyfile" -days "$cfg_ca_days" -out "$certfile"
+}
+
+function do_ca_new-key() {
+	need_resources openssl
+	need_cfg cfg_ca_dir cfg_ca_keyfile/no_override cfg_ca_rsa_bits
+	local keyfile="${cfg_ca_dir}/$cfg_ca_keyfile"
+	call "$cfg_app_openssl" genrsa -out "$keyfile" "$cfg_ca_rsa_bits"
+}
+
+function do_ca_tocard() {
+	need_resources pkcs15-init
+	need_cfg cfg_ca_dir cfg_ca_keyfile cfg_ca_certfile
+	local keyfile="${cfg_ca_dir}/$cfg_ca_keyfile"
+	local certfile="${cfg_ca_dir}/$cfg_ca_certfile"
+	
+	msg_warning "THIS ACTION OVERRIDES PREVIOUSLY STORED KEYS"
+	if ! readinput_yesno -d n "Write key and certificate to card?"; then
+		return
+	fi
+	call "$cfg_app_pkcs15_init" --delete-objects privkey,pubkey,cert --store-private-key "$keyfile" --id 3 --auth-id 3 --verify-pin
+	call "$cfg_app_pkcs15_init" --store-certificate "$certfile" --id 3 --auth-id 3 --verify-pin
+}
+
+function do_ca_new-csr() {
+	need_cfg cfg_ca_hsmmode
+	local outfn="intermediateCA.csr"
+	local subj="/CN=Example Intermediate CA"
+
+	readinput -d "$subj" "Subject"; subj="$REPLY"
+	readinput -d "$outfn" "CSR Filename" -f validate_file_not_exists; outfn="$REPLY"
+	
+	if [[ "${cfg_ca_hsmmode}" == "y" ]]; then
+		need_resources openssl engine_pkcs11 opensc_pkcs11
+		local key_id="02:03"
+		readinput -d "$key_id" "Private Key (<Auth-ID>:<Key-ID>)"; key_id="$REPLY"
+		
+		( openssl_engine ;
+		echo "req -new -engine pkcs11 -key \"$key_id\" -keyform engine -out \"$outfn\" -config ./openssl-intermediate.conf -subj \"$subj\"" ) | call "${cfg_app_openssl}"
+	else
+		need_resources openssl
+		need_cfg cfg_ca_dir cfg_ca_keyfile
+
+		local keyfile="${cfg_ca_dir}/$cfg_ca_keyfile"
+		
+		call ${cfg_app_openssl} req -new -key "$keyfile" -out "$outfn" -config ./openssl-intermediate.conf -subj "$subj"
+	fi
+}
+
+function do_ca_sign-csr() {
+	need_cfg cfg_ca_hsmmode
+	local is_intca=n subj csrfile="request.csr" intca
+	
+	readinput -d "$csrfile" -f validate_file_exists "CSR file"; csrfile="$REPLY"
+	
+	readinput_yesno -d $is_intca "Sign intermediate CA?"; is_intca="$REPLY"
+	if [[ "$is_intca" == "y" ]]; then
+		intca="-extensions v3_intermediate_ca"
+	fi
+
+	readinput -d "$subj" "Subject, e.g. /CN=Admin-1 or empty to use CSR Subject"; subj="$REPLY"
+	if [[ -n "$subj" ]]; then
+		subj="-subj \"$subj\""
+	fi
+
+	local outfn="$(basename "$csrfile" .csr).crt"
+	readinput -d "$outfn" "Output file"
+
+	need_cfg cfg_ca_dir cfg_ca_certfile cfg_ca_signdays
+	local certfile="${cfg_ca_dir}/$cfg_ca_certfile"
+	
+	call "${cfg_app_openssl}" req -in "$csrfile" -noout -text
+	if ! readinput_yesno -d n "Sign this CSR?"; then
+		msg_debug "not signing"
+		return
+	fi
+	
+	need_resource casetup
+	
+	if [[ "${cfg_ca_hsmmode}" == "y" ]]; then
+		need_resources openssl engine_pkcs11 opensc_pkcs11
+		local key_id="02:03"
+		readinput -d "$key_id" "Private Key (<Auth-ID>:<Key-ID>)"; key_id="$REPLY"
+		
+		
+		local openssl_cmd="ca -engine pkcs11 -keyfile \"$key_id\" -keyform engine -config ./openssl-rootca.conf -batch -days $cfg_ca_signdays $subj $intca -cert \"$certfile\" -out \"$outfn\" -infiles \"$csrfile\" "
+		msg_debug "$(openssl_engine)"
+		msg_debug "$openssl_cmds"
+		( openssl_engine ; echo "$openssl_cmd" ) | call "${cfg_app_openssl}"
+	else
+		need_cfg cfg_ca_keyfile
+		call "${cfg_app_openssl}" -keyfile "${cfg_ca_dir}/${cfg_ca_keyfile}" -config ./openssl-rootca.conf -batch -days $cfg_ca_signdays $subj $intca -cert "$certfile" -out "$outfn" -infiles "$csrfile"
+	fi
+}
+
+function do_ca_nofm() {
+	need_resources openssl ssss-split
+	need_cfg cfg_ca_dir cfg_ca_keyfile
+	local keyfile="${cfg_ca_dir}/$cfg_ca_keyfile"
+	local n=3 m=5
+	
+	readinput -d $n "Threshold (n)"; n="$REPLY"
+	readinput -d $m "Shares (m)"; m="$REPLY"
+	
+	local pw=$(${cfg_app_openssl} rand -hex 16)
+	echo "$pw" | call "${cfg_app_ssss_split}" -t "$n" -n "$m"
+	echo "$pw" | call ${cfg_app_openssl} enc -aes-256-cbc -in "$keyfile" -out "${keyfile}.enc" -pass stdin -a
+	unset pw
+}
+
+function do_ca_nofm-recovery() {
+	need_resources openssl ssss-combine
+	need_cfg cfg_ca_dir cfg_ca_keyfile/nocheck
+	local keyfile="${cfg_ca_dir}/$cfg_ca_keyfile"
+	local keyfileenc="${keyfile}.enc"
+	
+	if [[ ! -r "$keyfileenc" ]]; then
+		msg_error "$keyfileenc: file not found or not readable"
+		return
+	fi
+	if [[ -f "$keyfile" ]]; then
+		msg_error "$keyfile: keyfile already exists. no need for recovery."
+		return
+	fi
+	
+	local n=3
+	readinput -d $n "Threshold (n)"; n="$REPLY"
+	
+	msg_input "Enter $n password shares:"
+	${cfg_app_ssss_combine} -t "$n" -Q 2>&1 | call ${cfg_app_openssl} enc -aes-256-cbc -d -in "$keyfileenc" -out "${keyfile}" -pass stdin -a
+	call ${cfg_app_openssl} rsa -in "$keyfile" -check -noout
+}
+
+function do_main_gpg() {
+	local -a options=(
+		"v" "show gpg version"
+		"cs" "smartcard status"
+		"ce" "smartcard edit"
+		"" "Back")
+	showmenu -t "GPG MENU" -p "GPG" -n gpg "${options[@]}"
+
+}
+
+function do_gpg_cs() {
+	need_resource gpg
+	call "${cfg_app_gpg}" --card-status
+}
+function do_gpg_ce() {
+	need_resource gpg
+	call "${cfg_app_gpg}" --card-edit
+}
+
+function do_gpg_v() {
+	need_resource gpg
+	call "${cfg_app_gpg}" --version
+}
+
+function do_gpg_() {
+	return 2
+}
+
+function do_main_sc() {
+	local -a options=(
+		"i" "List public keys, private keys and certificates"
+		"ssh" "Show SSH public key with pkcs15-tool"
+		"ssh11" "Show SSH public key with openssh via PKCS#11"
+		"new-key" "Generate new public/private key pair on smartcard"
+		"new-csr" "Generate Certificate Signing Request"
+		"store-key" "Store private key on smartcard"
+		"store-crt" "Store certificate on smartcard"
+		"read-crt" "Retrieve certificate from smartcard"
+		"cryptostick-reset-REALLY" "Reset Cryptostick + Nitrokey Pro/Start to defaults"
+		"" "Back")
+	showmenu -t "SMARTCARD MENU" -p "SC" -n sc "${options[@]}"
+}
+
+function do_sc_i() {
+	need_resource pkcs15-tool
+	call "${cfg_app_pkcs15_tool}" --list-keys --list-certificates --list-public-keys
+}
+
+function do_sc_ssh() {
+	need_resource pkcs15-tool
+	need_cfg tmp_key_id
+	call "${cfg_app_pkcs15_tool}" --read-ssh-key "$tmp_key_id"
+}
+
+function do_sc_ssh11() {
+	need_resources ssh-keygen opensc_pkcs11
+	call ${cfg_app_ssh_keygen} -D ${cfg_file_opensc_pkcs11}
+}
+
+function do_sc_new-key() {
+	local key_spec="rsa/2048"
+	need_resource pkcs15-init
+	
+	readinput -d $key_spec "Key Specification"; key_spec="$REPLY"
+	need_cfg tmp_key_id tmp_auth_id
+	
+	msg_warning "IF SET, THIS WILL OVERRIDE A PREVIOUS KEY WITH ID $key_id."
+	if ! readinput_yesno -d n "Please confirm operation"; then
+		return
+	fi
+
+	OPENSC_DEBUG=${OPENSC_DEBUG:-2} call time "${cfg_app_pkcs15_init}" \
+		--delete-objects privkey,pubkey,cert \
+		--generate-key "$key_spec" --id "$tmp_key_id" --auth-id "$tmp_auth_id" --verify-pin
+}
+
+function do_sc_new-csr() {
+	local outfn="usercert-$(printf "%04d" $(($RANDOM % 10000))).csr"
+	local subj="/CN=Hans Wurst" key_id="02:03"
+
+	need_resources openssl engine_pkcs11 opensc_pkcs11
+	readinput -d "$subj" "Subject"; subj="$REPLY"
+	readinput -d "$outfn" "CSR Filename"; outfn="$REPLY"
+	readinput -d "$key_id" "Private Key (<Auth-ID>:<Key-ID>)"; key_id="$REPLY"
+	
+	( openssl_engine ;
+	echo "req -new -engine pkcs11 -key \"$key_id\" -keyform engine -out \"$outfn\" -subj \"$subj\"" ) | call "${cfg_app_openssl}"
+
+}
+
+function do_sc_store-key() {
+	need_resources pkcs15-init
+	local keyfile key_id=03 auth_id=03
+	
+	readinput -d "$keyfile" -f validate_file_exists "Key file (PEM)"; keyfile="$REPLY"
+	need_cfg tmp_key_id tmp_auth_id
+
+	msg_warning "IF SET, THIS WILL OVERRIDE A PREVIOUS KEY WITH ID $tmp_key_id."
+	if ! readinput_yesno -d n "Please confirm operation"; then
+		return
+	fi
+
+	call "$cfg_app_pkcs15_init" --delete-objects privkey,pubkey,cert --store-private-key "$keyfile" --id $tmp_key_id --auth-id $tmp_auth_id --verify-pin
+}
+
+function do_sc_store-crt() {
+	need_resources pkcs15-init
+	local certfile
+	
+	readinput -d "$certfile" -f validate_file_exists "Certificate file (PEM)"; certfile="$REPLY"
+	need_cfg tmp_key_id tmp_auth_id
+
+	msg_warning "IF SET, THIS WILL OVERRIDE A PREVIOUS KEY WITH ID $tmp_key_id."
+	if ! readinput_yesno -d n "Please confirm operation"; then
+		return
+	fi
+	call "$cfg_app_pkcs15_init" --delete-objects cert --store-certificate "$certfile" --id $tmp_key_id --auth-id $tmp_auth_id --verify-pin
+}
+
+function do_sc_read-crt() {
+	need_resources pkcs15-tool
+	need_cfg tmp_key_id
+	local certfile="output-${tmp_key_id}.crt"
+	
+	readinput -d "$certfile" -f validate_file_not_exists "Output certificate file"; certfile="$REPLY"
+	
+	call "$cfg_app_pkcs15_tool" -r "$tmp_key_id" >$certfile
+}
+
+function do_sc_cryptostick-reset-REALLY() {
+	need_resource opensc-tool
+	msg_warning "THIS WILL DESTROY ALL KEYS AND RESET PINS."
+	if ! readinput_yesno -d n "Please confirm factory reset of Cryptostick/Nitrokey"; then
+		return
+	fi
+	
+	call "${cfg_app_opensc_tool}" \
+	-s 00:20:00:81:08:40:40:40:40:40:40:40:40 \
+	-s 00:20:00:81:08:40:40:40:40:40:40:40:40 \
+	-s 00:20:00:81:08:40:40:40:40:40:40:40:40 \
+	-s 00:20:00:81:08:40:40:40:40:40:40:40:40 \
+	-s 00:20:00:83:08:40:40:40:40:40:40:40:40 \
+	-s 00:20:00:83:08:40:40:40:40:40:40:40:40 \
+	-s 00:20:00:83:08:40:40:40:40:40:40:40:40 \
+	-s 00:20:00:83:08:40:40:40:40:40:40:40:40 \
+	-s 00:e6:00:00 \
+	-s 00:44:00:00 && msg "done."
+}
+
+function do_sc_() {
+	return 2
+}
+
+function do_main_ssl() {
+	local -a options=(
+		"i" "x509 certificate info"
+		"new-csr" "Generate new private key and CSR"
+		"" "Back")
+	showmenu -t "OPENSSL MENU" -p "SSL" -n ssl "${options[@]}"
+}
+
+function do_ssl_i() {
+	need_resources openssl
+	local certfile
+	readinput -d "input.crt" -f validate_ca_file_exists "Certificate file"; certfile="$REPLY"
+	call "${cfg_app_openssl}" x509 -in "$certfile" -text -noout
+}
+
+function do_ssl_new-csr() {
+	need_resources openssl
+	local outbase="usercert-$(printf "%04d" $(($RANDOM % 10000)))"
+	local outcsr="${outbase}.csr"
+	local outkey="${outbase}.key"
+	local key_spec="rsa:4096"
+	readinput -d "$outcsr" -f validate_file_not_exists "CSR file"; outcsr="$REPLY"
+	readinput -d "$outkey" -f validate_file_not_exists "Key file"; outkey="$REPLY"
+	readinput -d $key_spec "Key Specification"; key_spec="$REPLY"
+
+	call "${cfg_app_openssl}" req -out "$outcsr" -new -newkey "$key_spec" -nodes -keyout "$outkey"
+}
+
+function do_ssl_() {
+	return 2
+}
+
+
+##
+
+function need_cfg() {
+	for name in "$@"; do
+		case "$name" in
+			cfg_ca_dir) readinput -n -v cfg_ca_dir -d . -f validate_dir_writable "CA directory" ;;
+			cfg_ca_keyfile) readinput -n -v cfg_ca_keyfile -d rootCA.key -f validate_ca_file_exists "CA private key file" ;;
+			cfg_ca_keyfile/no_override) readinput -v cfg_ca_keyfile -d rootCA.key -f validate_ca_file_override "CA private key file" ;;
+			cfg_ca_keyfile/nocheck) readinput -n -v cfg_ca_keyfile -d rootCA.key "CA private key file" ;;
+			cfg_ca_certfile) readinput -v cfg_ca_certfile -d rootCA.crt -f validate_ca_file_exists "CA public key file" ;;
+			cfg_ca_certfile/no_override) readinput -v cfg_ca_certfile -d rootCA.crt -f validate_ca_file_override "CA public key file" ;;
+			cfg_ca_rsa_bits) readinput -v cfg_ca_rsa_bits -d 4096 "RSA bits (e.g. 1024, 2048, 3072, 4096, 8192)?" ;;
+			cfg_ca_days) readinput -v cfg_ca_days -d 3650 "Validity period in days" ;;
+			cfg_ca_signdays) readinput -v cfg_ca_signdays -d 3600 "Validity period in days" ;;
+			cfg_ca_hsmmode) readinput_yesno -d y -v cfg_ca_hsmmode "Use HSM / hardware token?" ;;
+			tmp_key_id)
+				msg "Key IDs for Cryptostick/Nitrokey: 01=signature key, 02=encryption key, 03=authentication key"
+				readinput -v tmp_key_id -d 03 "Key ID"
+				;;
+			tmp_auth_id)
+				msg "Auth IDs for Cryptostick/Nitrokey: 01=user signature pin, 02=user pin, 03=admin pin"
+				readinput -v tmp_auth_id -d 03 "Auth ID"
+				;;
+			*) msg_error "internal error: unknown cfg '$name'" ;;
+		esac
+	done
+	save_config
+}
+
+## validators
+
+function validate_yesno() {
+	case "$1" in
+		y|n) return 0 ;;
+		*) return 1 ;;
+	esac
+}
+
+function validate_dir_writable() {
+	if [[ ! -d "$1" ]]; then
+		if readinput_yesno -d y "Directory does not exist. Create?"; then
+			call mkdir -p "$1"
+			call chmod 700 "$1"
+		fi
+	fi
+	[[ -w "$1" ]]
+}
+
+
+function validate_ca_file_override() {
+	local keyfile="${cfg_ca_dir}/$1"
+	if [[ -f "$keyfile" ]]; then
+		msg_error "Certificate file '$keyfile' already exists. Please remove manually if you really know what you are doing."
+		return 1
+	fi
+	return 0
+}
+
+function validate_ca_file_exists() {
+	local keyfile="${cfg_ca_dir}/$1"
+	if [[ ! -r "$keyfile" ]]; then
+		msg_error "Certificate file '$keyfile' does not exist or is not readable."
+		return 1
+	fi
+	return 0
+}
+
+function validate_ca_file_not_exists() {
+	local keyfile="${cfg_ca_dir}/$1"
+	if [[ -f "$keyfile" ]]; then
+		msg_error "Certificate file '$keyfile' already exists."
+		return 1
+	fi
+	return 0
+}
+
+function validate_file_exists() {
+	if [[ ! -f "$1" ]]; then
+		msg_error "$1: file not found"
+		return 1
+	fi
+	return 0
+}
+
+function validate_file_not_exists() {
+	if [[ -f "$1" ]]; then
+		msg_error "$1: file exists"
+		return 1
+	fi
+	return 0
+}
+
+## config
+
+function save_config() {
+	local opt
+	echo "## autogenerated config file for micro-ca-tool $g_version" >$g_configfile
+	for opt in "${!cfg_ca@}" "${!cfg_app@}" "${!cfg_file@}"; do
+		echo "$opt=\"${!opt/\"/\\\"}\"" >>$g_configfile
+	done
+}
+
+function read_config() {
+	if [[ -f "$g_configfile" ]]; then
+		. "$g_configfile"
+	else
+		first_time_user
+		save_config
+	fi
+}
+
+function first_time_user() {
+fold -s <<EOT
+
+Welcome to µ-CA.
+This tool will help you to perform basic tasks with your CA:
+* Create CA as files
+* or Create CA on a SmartCard
+* or Create CA as files and store on SmartCard
+* Create intermediate CA
+* Sign other certificates
+* Backup CA key with n-of-m scheme key sharing
+* Create client certificates
+* Basic SmartCard functions: Info, Read, Write, Generate keys, Reset
+
+SECURITY NOTE: This tool handles secret keys. As such it is best to follow the following guidelines:
+* Use this tool only on single-user and non-networked systems.
+* Make sure files are stored on an encrypted filesystem only. E.g. copy this script to a crypto-container.
+* Do not leave unencrypted private keys when done. Better encrypt them for backup or store them on an HSM.
+* When done, unmount the encrypted filesystem.
+
+EOT
+}
+
+banner
+parse_options "$@"; shift $((OPTIND-1))
+read_config
+
+if [[ $# -ge 2 ]]; then
+	if [[ "$(type -t "do_$1_$2")" == "function" ]]; then
+		"do_$1_$2"
+	else
+		msg_error "$1 $2: function not found"
+		exit 1
+	fi
+else
+	mainmenu
+	echo -e "\nBye."
+fi
