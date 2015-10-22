@@ -602,7 +602,7 @@ function do_sc_new-key() {
 	readinput -d $key_spec "Key Specification"; key_spec="$REPLY"
 	need_cfg tmp_key_id tmp_auth_id
 	
-	msg_warning "IF SET, THIS WILL OVERRIDE A PREVIOUS KEY WITH ID $key_id."
+	msg_warning "IF SET, THIS WILL OVERRIDE A PREVIOUS KEY WITH ID $ktmp_ey_id."
 	if ! readinput_yesno -d n "Please confirm operation"; then
 		return
 	fi
