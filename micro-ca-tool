@@ -10,7 +10,7 @@ g_configfile="./micro-ca-tool.config"
 g_debug=0
 g_version="0.1dev1"
 g_bin_search_path=( "/opt/local/bin" "/usr/local/bin" "/Library/OpenSC/bin" )
-g_engine_pkcs11_path=( /usr/lib/engines /usr/local/lib/engines /Library/OpenSC/lib/engines )
+g_engine_pkcs11_path=( /usr/lib/engines /usr/local/lib /Library/OpenSC/lib/engines )
 g_opensc_pkcs11_path=( /usr/lib/x86_64-linux-gnu /Library/OpenSC/lib )
 
 ## getopts
@@ -494,7 +494,7 @@ function do_ca_sign-csr() {
 		( openssl_engine ; echo "$openssl_cmd" ) | call "${cfg_app_openssl}"
 	else
 		need_cfg cfg_ca_keyfile
-		call "${cfg_app_openssl}" -keyfile "${cfg_ca_dir}/${cfg_ca_keyfile}" -config ./openssl-rootca.conf -batch -days $cfg_ca_signdays $subj $intca -cert "$certfile" -out "$outfn" -infiles "$csrfile"
+		call "${cfg_app_openssl}" ca -keyfile "${cfg_ca_dir}/${cfg_ca_keyfile}" -config ./openssl-rootca.conf -batch -days $cfg_ca_signdays $subj $intca -cert "$certfile" -out "$outfn" -infiles "$csrfile"
 	fi
 }
 
@@ -541,6 +541,7 @@ function do_main_gpg() {
 		"v" "show gpg version"
 		"cs" "smartcard status"
 		"ce" "smartcard edit"
+		"pin" "change pin/admin pin or unblock pin"
 		"" "Back")
 	showmenu -t "GPG MENU" -p "GPG" -n gpg "${options[@]}"
 
@@ -558,6 +559,11 @@ function do_gpg_ce() {
 function do_gpg_v() {
 	need_resource gpg
 	call "${cfg_app_gpg}" --version
+}
+
+function do_gpg_pin() {
+	need_resource gpg
+	call "${cfg_app_gpg}" --change-pin
 }
 
 function do_gpg_() {
