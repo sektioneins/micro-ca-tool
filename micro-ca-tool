@@ -104,6 +104,9 @@ function need_resource() {
 		gpg)
 			find_executable cfg_app_gpg "Please select gpg version 2 binary or enter full path" gpg2 gpg
 			;;
+		gpg-connect-agent)
+			find_executable cfg_app_gpg_connect_agent "Please select gpg-connect-agent or enter full path" gpg-connect-agent
+			;;
 		pkcs15-init)
 			find_executable cfg_app_pkcs15_init "Please select the OpenSC pkcs15-init tool" pkcs15-init
 			;;
@@ -542,6 +545,8 @@ function do_main_gpg() {
 		"cs" "smartcard status"
 		"ce" "smartcard edit"
 		"pin" "change pin/admin pin or unblock pin"
+		"kill" "kill scdaemon (useful for PKCS#11 operations)"
+		"agent" "connect to a running gpg agent"
 		"" "Back")
 	showmenu -t "GPG MENU" -p "GPG" -n gpg "${options[@]}"
 
@@ -564,6 +569,15 @@ function do_gpg_v() {
 function do_gpg_pin() {
 	need_resource gpg
 	call "${cfg_app_gpg}" --change-pin
+}
+
+function do_gpg_kill() {
+	call killall -9 scdaemon
+}
+
+function do_gpg_agent() {
+	need_resource gpg-connect-agent
+	call "${cfg_app_gpg_connect_agent}"
 }
 
 function do_gpg_() {
