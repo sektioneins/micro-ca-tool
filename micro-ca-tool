@@ -11,7 +11,7 @@ g_debug=0
 g_version="0.1dev1"
 g_bin_search_path=( "/opt/local/bin" "/usr/local/bin" "/Library/OpenSC/bin" )
 g_engine_pkcs11_path=( /usr/lib/engines /usr/local/lib /Library/OpenSC/lib/engines )
-g_opensc_pkcs11_path=( /usr/lib/x86_64-linux-gnu /Library/OpenSC/lib )
+g_opensc_pkcs11_path=( /usr/lib/x86_64-linux-gnu /Library/OpenSC/lib /usr/local/lib )
 
 ## getopts
 function parse_options() {
