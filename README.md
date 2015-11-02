@@ -23,4 +23,4 @@ On Debian/Ubuntu just type:
 
 SmartCard Support
 -----------------
-µ-CA was developed with focus on Nitrokey/CryptoStick. However other PKCS#11 compliant SmartCards should work as well.
+µ-CA was developed with focus on Nitrokey Pro and Crypto Stick. However other OpenPGP-Cards and PKCS#11 compliant SmartCards should work as well, e.g. Nitrokey Storage, Yubikey Neo or the FSFE Fellowship Smart Card.
