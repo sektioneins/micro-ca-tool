@@ -15,7 +15,7 @@ This tool will help you to perform basic tasks with your CA:
 
 Installation
 ------------
-This tool is written in bash. Other dependencies are OpenSSL, OpenSC, GPG (version 2) and ssss.
+This tool is written in Bash. Other dependencies are OpenSSL, OpenSC, GPG (version 2) and ssss.
 
 On Debian/Ubuntu just type:
 
@@ -23,4 +23,4 @@ On Debian/Ubuntu just type:
 
 SmartCard Support
 -----------------
-µ-CA was developed with focus on Nitrokey Pro and Crypto Stick. However other OpenPGP-Cards and PKCS#11 compliant SmartCards should work as well, e.g. Nitrokey Storage, Yubikey Neo or the FSFE Fellowship Smart Card.
+The µ-CA-Tool was developed with focus on Nitrokey Pro and Crypto Stick. However other OpenPGP-Cards and PKCS#11 compliant SmartCards should work as well, e.g. Nitrokey Storage, Yubikey Neo or the FSFE Fellowship Smart Card.
