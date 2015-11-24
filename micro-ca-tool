@@ -725,6 +725,7 @@ function do_main_ssl() {
 	local -a options=(
 		"i" "x509 certificate info"
 		"new-csr" "Generate new private key and CSR"
+		"new-pair" "Generate new private/public key pair"
 		"" "Back")
 	showmenu -t "OPENSSL MENU" -p "SSL" -n ssl "${options[@]}"
 }
@@ -747,6 +748,23 @@ function do_ssl_new-csr() {
 	readinput -d $key_spec "Key Specification"; key_spec="$REPLY"
 
 	call "${cfg_app_openssl}" req -out "$outcsr" -new -newkey "$key_spec" -nodes -keyout "$outkey"
+	call chmod 600 "$outkey"
+}
+
+function do_ssl_new-pair() {
+	need_resources openssl
+	local outbase="usercert-$(printf "%04d" $(($RANDOM % 10000)))"
+	local outpub="${outbase}.pub"
+	local outkey="${outbase}.key"
+	local rsa_bits="4096"
+
+	readinput -d "$outkey" -f validate_file_not_exists "Key file"; outkey="$REPLY"
+	readinput -d "$outpub" -f validate_file_not_exists "Public key file"; outpub="$REPLY"
+	readinput -d $rsa_bits "RSA bits (e.g. 2048 or 4096)"; rsa_bits="$REPLY"
+
+	call "$cfg_app_openssl" genrsa -out "$outkey"  "$rsa_bits"
+	call chmod 600 "$outkey"
+	call "$cfg_app_openssl" rsa -in "$outkey" -pubout -out "$outpub"
 }
 
 function do_ssl_() {
