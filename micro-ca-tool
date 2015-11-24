@@ -425,6 +425,7 @@ function do_ca_new-key() {
 	need_cfg cfg_ca_dir cfg_ca_keyfile/no_override cfg_ca_rsa_bits
 	local keyfile="${cfg_ca_dir}/$cfg_ca_keyfile"
 	call "$cfg_app_openssl" genrsa -out "$keyfile" "$cfg_ca_rsa_bits"
+	call chmod 600 "$keyfile"
 }
 
 function do_ca_tocard() {
