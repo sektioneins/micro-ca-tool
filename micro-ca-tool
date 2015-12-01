@@ -382,7 +382,7 @@ function mainmenu() {
 		"ca" "Certificate Authority"
 		"sc" "SmartCard functions PKCS#11/PKCS#15"
 		"gpg" "GNUPG shortcuts"
-		"ssl" "openssl shortcuts"
+		"ssl" "openssl and related shortcuts"
 		"q" "Quit")
 	showmenu -t "MAIN MENU" -p "/" -n main "${options[@]}"
 }
@@ -725,6 +725,8 @@ function do_main_ssl() {
 		"i" "x509 certificate info"
 		"new-csr" "Generate new private key and CSR"
 		"new-pair" "Generate new private/public key pair"
+		"ssh2pem" "Convert RSA public key from RFC4716 (SSH) format to PEM"
+		"pem2ssh" "Convert RSA public key from PEM format to RFC4716"
 		"" "Back")
 	showmenu -t "OPENSSL MENU" -p "SSL" -n ssl "${options[@]}"
 }
@@ -764,6 +766,30 @@ function do_ssl_new-pair() {
 	call "$cfg_app_openssl" genrsa -out "$outkey"  "$rsa_bits"
 	call chmod 600 "$outkey"
 	call "$cfg_app_openssl" rsa -in "$outkey" -pubout -out "$outpub"
+}
+
+function do_ssl_ssh2pem() {
+	need_resources ssh-keygen
+	local infile="~/.ssh/id_rsa.pub"
+	local outfile="id_rsa.pem"
+	 
+	readinput -d "$infile" -f validate_file_exists_home "Input: SSH public key file"; infile="${REPLY/\~/$HOME}"
+	readinput -d "$outfile" -f validate_file_not_exists_home "Output: PEM file"; outfile="${REPLY/\~/$HOME}"
+
+	msg_debug "calling: $cfg_app_ssh_keygen -f $infile -e -m pem >$outfile"
+	"$cfg_app_ssh_keygen" -f "$infile" -e -m pem >"$outfile"
+}
+
+function do_ssl_pem2ssh() {
+	need_resources ssh-keygen
+	local infile="id_rsa.pem"
+	local outfile="id_rsa.pub"
+	 
+	readinput -d "$infile" -f validate_file_exists_home "Input: RSA public key PEM file"; infile="${REPLY/\~/$HOME}"
+	readinput -d "$outfile" -f validate_file_not_exists_home "Output: SSH keyfile"; outfile="${REPLY/\~/$HOME}"
+
+	msg_debug "calling: $cfg_app_ssh_keygen -f $infile -e -m pem >$outfile"
+	"$cfg_app_ssh_keygen" -f "$infile" -i -m PEM >"$outfile"
 }
 
 function do_ssl_() {
@@ -857,6 +883,22 @@ function validate_file_exists() {
 
 function validate_file_not_exists() {
 	if [[ -f "$1" ]]; then
+		msg_error "$1: file exists"
+		return 1
+	fi
+	return 0
+}
+
+function validate_file_exists_home() {
+	if [[ ! -f "${1/\~/$HOME}" ]]; then
+		msg_error "$1: file not found"
+		return 1
+	fi
+	return 0
+}
+
+function validate_file_not_exists_home() {
+	if [[ -f "${1/\~/$HOME}" ]]; then
 		msg_error "$1: file exists"
 		return 1
 	fi
