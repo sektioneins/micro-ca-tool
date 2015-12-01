@@ -187,7 +187,6 @@ function find_executable() {
 	
 	for fn in "${@:3}"; do
 		if which "$fn" >/dev/null; then
-			echo "ok"
 			options=( "${options[@]}" "$fn" )
 		fi
 		
