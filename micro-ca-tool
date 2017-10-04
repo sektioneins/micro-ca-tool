@@ -479,7 +479,7 @@ function do_ca_sign-csr() {
 
 	readinput -d "$subj" "Subject, e.g. /CN=Admin-1 or empty to use CSR Subject"; subj="$REPLY"
 	if [[ -n "$subj" ]]; then
-		subj="-subj \"$subj\""
+		subj=( -subj "$subj" )
 	fi
 
 	local outfn="$(basename "$csrfile" .csr).crt"
@@ -502,13 +502,13 @@ function do_ca_sign-csr() {
 		readinput -d "$key_id" "Private Key (<Auth-ID>:<Key-ID>)"; key_id="$REPLY"
 		
 		
-		local openssl_cmd="ca -engine pkcs11 -keyfile \"$key_id\" -keyform engine -config ./openssl-rootca.conf -batch -days $cfg_ca_signdays $subj $intca -cert \"$certfile\" -out \"$outfn\" -infiles \"$csrfile\" "
+		local openssl_cmd="ca -engine pkcs11 -keyfile \"$key_id\" -keyform engine -config ./openssl-rootca.conf -batch -days $cfg_ca_signdays "${subj[@]}" $intca -cert \"$certfile\" -out \"$outfn\" -infiles \"$csrfile\" "
 		msg_debug "$(openssl_engine)"
 		msg_debug "$openssl_cmds"
 		( openssl_engine ; echo "$openssl_cmd" ) | call "${cfg_app_openssl}"
 	else
 		need_cfg cfg_ca_keyfile
-		call "${cfg_app_openssl}" ca -keyfile "${cfg_ca_dir}/${cfg_ca_keyfile}" -config ./openssl-rootca.conf -batch -days $cfg_ca_signdays $subj $intca -cert "$certfile" -out "$outfn" -infiles "$csrfile"
+		call "${cfg_app_openssl}" ca -keyfile "${cfg_ca_dir}/${cfg_ca_keyfile}" -config ./openssl-rootca.conf -batch -days $cfg_ca_signdays "${subj[@]}" $intca -cert "$certfile" -out "$outfn" -infiles "$csrfile"
 	fi
 }
 
