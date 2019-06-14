@@ -722,6 +722,7 @@ function do_sc_() {
 
 function do_main_ssl() {
 	local -a options=(
+		"gen-dh" "Generates DH (Diffie-Hellman) parameters"
 		"i" "x509 certificate info"
 		"new-csr" "Generate new private key and CSR"
 		"new-pair" "Generate new RSA private/public key pair"
@@ -730,6 +731,15 @@ function do_main_ssl() {
 		"pem2ssh" "Convert RSA public key from PEM format to RFC4716"
 		"" "Back")
 	showmenu -t "OPENSSL MENU" -p "SSL" -n ssl "${options[@]}"
+}
+
+function do_ssl_gen-dh() {
+	need_resources openssl
+	need_cfg cfg_ca_dir cfg_dh_file/no_override cfg_dh_size
+
+	local dhfile="${cfg_ca_dir}/$cfg_dh_file"
+	call "$cfg_app_openssl" genpkey -genparam -algorithm DH -pkeyopt dh_paramgen_prime_len:${cfg_dh_size} -out "$dhfile"
+	call chmod 644 "$dhfile"
 }
 
 function do_ssl_i() {
@@ -830,6 +840,8 @@ function need_cfg() {
 			cfg_ca_days) readinput -v cfg_ca_days -d 3650 "Validity period in days" ;;
 			cfg_ca_signdays) readinput -v cfg_ca_signdays -d 3600 "Validity period in days" ;;
 			cfg_ca_hsmmode) readinput_yesno -d y -v cfg_ca_hsmmode "Use HSM / hardware token?" ;;
+			cfg_dh_file/no_override) readinput -v cfg_dh_file -d dh.pem -f validate_dh_file_override "Diffie-Hellman file" ;;
+			cfg_dh_size) readinput -v cfg_dh_size -d 4096 "Diffie-Hellman bits (e.g. 1024, 2048, 3072, 4096, 8192)?" ;;
 			tmp_key_id)
 				msg "Key IDs for Cryptostick/Nitrokey: 01=signature key, 02=encryption key, 03=authentication key"
 				readinput -v tmp_key_id -d 03 "Key ID"
@@ -918,6 +930,15 @@ function validate_file_exists_home() {
 function validate_file_not_exists_home() {
 	if [[ -f "${1/\~/$HOME}" ]]; then
 		msg_error "$1: file exists"
+		return 1
+	fi
+	return 0
+}
+
+function validate_dh_file_override() {
+	local dhfile="${cfg_ca_dir}/$1"
+	if [[ -f "$dhfile" ]]; then
+		msg_error "Diffie-Hellman file '$dhfile' already exists. Please remove manually if you really know what you are doing."
 		return 1
 	fi
 	return 0
