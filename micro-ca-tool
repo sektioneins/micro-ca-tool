@@ -480,6 +480,8 @@ function do_ca_sign-csr() {
 	readinput -d "$subj" "Subject, e.g. /CN=Admin-1 or empty to use CSR Subject"; subj="$REPLY"
 	if [[ -n "$subj" ]]; then
 		subj=( -subj "$subj" )
+	else
+		subj=()
 	fi
 
 	local outfn="$(basename "$csrfile" .csr).crt"
